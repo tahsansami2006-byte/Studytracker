@@ -170,3 +170,124 @@ fun App(tick: Int) {
         }
     }
 }
+
+@Composable
+fun TodayScreen(ctx: Context, store: Store, todos: List<Todo>, tick: Int) {
+    val access = remember(tick) { hasUsageAccess(ctx) }
+    val screenMin = remember(tick) { if (access) todayUsage(ctx).sumOf { it.second } else 0L }
+    val done = todos.count { it.done }
+    val progress = if (todos.isEmpty()) 0f else done.toFloat() / todos.size
+
+    Text("Daily Report", style = MaterialTheme.typography.headlineMedium)
+    Spacer(Modifier.height(16.dp))
+    Card(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp)) {
+            Text("Tasks: $done / ${todos.size} done")
+            Spacer(Modifier.height(8.dp))
+            LinearProgressIndicator(progress = { progress }, modifier = Modifier.fillMaxWidth())
+        }
+    }
+    Spacer(Modifier.height(12.dp))
+    Card(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp)) {
+            Text("Reading / study time: ${fmt(store.readingMinutes())}")
+        }
+    }
+    Spacer(Modifier.height(12.dp))
+    Card(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp)) {
+            if (access) Text("Phone screen time: ${fmt(screenMin)}")
+            else Text("Allow usage access in the Apps tab to see screen time.")
+        }
+    }
+}
+
+@Composable
+fun AppsScreen(ctx: Context, tick: Int) {
+    val access = remember(tick) { hasUsageAccess(ctx) }
+    Text("App usage today", style = MaterialTheme.typography.headlineMedium)
+    Spacer(Modifier.height(12.dp))
+    if (!access) {
+        Text("To track your apps, please allow \"Usage access\" for this app.")
+        Spacer(Modifier.height(8.dp))
+        Button(onClick = { ctx.startActivity(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS)) }) {
+            Text("Open settings")
+        }
+        return
+    }
+    val usage = remember(tick) { todayUsage(ctx) }
+    if (usage.isEmpty()) Text("No app usage recorded yet today.")
+    LazyColumn {
+        items(usage) { (name, min) ->
+            Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+                Text(name)
+                Text(fmt(min))
+            }
+            HorizontalDivider()
+        }
+    }
+}
+
+@Composable
+fun TodoScreen(todos: List<Todo>, onChange: (List<Todo>) -> Unit) {
+    var text by remember { mutableStateOf("") }
+    Text("To-do list", style = MaterialTheme.typography.headlineMedium)
+    Spacer(Modifier.height(12.dp))
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        OutlinedTextField(
+            value = text, onValueChange = { text = it },
+            modifier = Modifier.weight(1f), label = { Text("New task") }, singleLine = true
+        )
+        Spacer(Modifier.width(8.dp))
+        Button(onClick = {
+            if (text.isNotBlank()) {
+                onChange(todos + Todo(System.currentTimeMillis(), text.trim(), false))
+                text = ""
+            }
+        }) { Text("Add") }
+    }
+    LazyColumn {
+        items(todos, key = { it.id }) { t ->
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Checkbox(checked = t.done, onCheckedChange = { c ->
+                    onChange(todos.map { if (it.id == t.id) it.copy(done = c) else it })
+                })
+                Text(t.text, Modifier.weight(1f))
+                TextButton(onClick = { onChange(todos.filter { it.id != t.id }) }) { Text("Delete") }
+            }
+        }
+    }
+}
+
+@Composable
+fun ReadingScreen(ctx: Context, store: Store, tick: Int) {
+    val nm = ctx.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+    val granted = remember(tick) { nm.isNotificationPolicyAccessGranted }
+    var on by remember(tick) { mutableStateOf(store.readingStart > 0) }
+
+    Text("Reading mode", style = MaterialTheme.typography.headlineMedium)
+    Spacer(Modifier.height(12.dp))
+    Text(
+        "When on, notifications are silenced. Only calls and messages from the " +
+            "contacts you allow as \"priority\" in Do Not Disturb settings will come through."
+    )
+    Spacer(Modifier.height(16.dp))
+    if (!granted) {
+        Button(onClick = { ctx.startActivity(Intent(Settings.ACTION_NOTIFICATION_POLICY_ACCESS_SETTINGS)) }) {
+            Text("Allow Do Not Disturb access")
+        }
+    } else {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(if (on) "Reading mode is ON" else "Reading mode is OFF", Modifier.weight(1f))
+            Switch(checked = on, onCheckedChange = { want ->
+                if (setReadingMode(ctx, store, want)) on = want
+            })
+        }
+        Spacer(Modifier.height(16.dp))
+        Text("Today's reading time: ${fmt(store.readingMinutes())}")
+        Spacer(Modifier.height(8.dp))
+        TextButton(onClick = { ctx.startActivity(Intent("android.settings.ZEN_MODE_PRIORITY_SETTINGS")) }) {
+            Text("Choose who can reach me")
+        }
+    }
+}
