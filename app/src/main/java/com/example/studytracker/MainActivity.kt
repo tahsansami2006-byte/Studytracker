@@ -106,3 +106,67 @@ fun setReadingMode(ctx: Context, store: Store, on: Boolean): Boolean {
 }
 
 fun fmt(min: Long) = if (min >= 60) "${min / 60}h ${min % 60}m" else "${min}m"
+
+// ---------- Activity ----------
+
+class MainActivity : ComponentActivity() {
+    private val tick = mutableIntStateOf(0)
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        val crashPrefs = getSharedPreferences("crash", Context.MODE_PRIVATE)
+        val lastCrash = crashPrefs.getString("trace", null)
+        Thread.setDefaultUncaughtExceptionHandler { _, e ->
+            crashPrefs.edit().putString("trace", android.util.Log.getStackTraceString(e)).commit()
+            Process.killProcess(Process.myPid())
+        }
+        if (lastCrash != null) {
+            crashPrefs.edit().remove("trace").apply()
+            setContent {
+                LazyColumn(Modifier.padding(16.dp).padding(top = 40.dp)) {
+                    item { Text("Crash report:\n\n" + lastCrash.take(1800)) }
+                }
+            }
+            return
+        }
+        setContent { MaterialTheme { App(tick.intValue) } }
+    }
+
+    // Refresh data when coming back from the Settings screens
+    override fun onResume() {
+        super.onResume()
+        tick.intValue++
+    }
+}
+
+// ---------- UI ----------
+
+@Composable
+fun App(tick: Int) {
+    val ctx = LocalContext.current
+    val store = remember { Store(ctx) }
+    var tab by remember { mutableIntStateOf(0) }
+    var todos by remember { mutableStateOf(store.todos()) }
+    val names = listOf("Today", "Apps", "To-do", "Reading")
+    val icons = listOf("📊", "📱", "✅", "📖")
+
+    Scaffold(bottomBar = {
+        NavigationBar {
+            names.forEachIndexed { i, n ->
+                NavigationBarItem(
+                    selected = tab == i, onClick = { tab = i },
+                    icon = { Text(icons[i]) }, label = { Text(n) }
+                )
+            }
+        }
+    }) { pad ->
+        Column(Modifier.padding(pad).padding(16.dp).fillMaxSize()) {
+            when (tab) {
+                0 -> TodayScreen(ctx, store, todos, tick)
+                1 -> AppsScreen(ctx, tick)
+                2 -> TodoScreen(todos) { todos = it; store.saveTodos(it) }
+                else -> ReadingScreen(ctx, store, tick)
+            }
+        }
+    }
+}
